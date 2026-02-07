@@ -2,6 +2,7 @@
 .env
 dji_credentials.txt
 .dji_mqtt_credentials.json
+emulator.log
 
 # Python
 __pycache__/

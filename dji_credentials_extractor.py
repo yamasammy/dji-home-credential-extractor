@@ -23,6 +23,7 @@ Usage:
 """
 
 import os
+import shutil
 import sys
 import subprocess
 import time
@@ -97,9 +98,48 @@ def run_command(cmd, check=True, capture=True, timeout=None):
         return None
 
 
+def _sdk_has_emulator(android_home):
+    """Return True if the SDK at android_home has the emulator binary."""
+    if not android_home:
+        return False
+    return Path(f"{android_home}/emulator/emulator").exists()
+
+
+def _sdk_has_system_image(android_home):
+    """Return True if the required system image exists under android_home."""
+    if not android_home:
+        return False
+    return Path(f"{android_home}/system-images/android-34/google_apis/arm64-v8a").is_dir()
+
+
+def check_android_studio_or_sdk():
+    """Check for Android Studio or a valid Android SDK with emulator."""
+    print_step("1.1", "Checking for Android Studio / Android SDK...")
+
+    # Android Studio installs SDK here on macOS
+    studio_sdk = Path.home() / "Library/Android/sdk"
+    android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if not android_home:
+        android_home = str(studio_sdk) if studio_sdk.exists() else None
+    if not android_home:
+        for path in [Path.home() / "Android/Sdk", Path("/opt/android-sdk")]:
+            if path.exists():
+                android_home = str(path)
+                break
+
+    if android_home and _sdk_has_emulator(android_home):
+        print_success("Android SDK with Emulator found")
+        return True
+    if android_home:
+        print_warning("Android SDK found but Emulator component missing (will install if possible)")
+    else:
+        print_warning("Android Studio / SDK not found (will try to install command-line tools via Homebrew)")
+    return False
+
+
 def check_homebrew():
     """Check if Homebrew is installed."""
-    print_step("1.1", "Checking for Homebrew...")
+    print_step("1.2", "Checking for Homebrew...")
 
     if run_command("which brew", check=False):
         print_success("Homebrew is installed")
@@ -116,7 +156,7 @@ def check_homebrew():
 
 def check_java():
     """Check if Java is installed."""
-    print_step("1.2", "Checking for Java...")
+    print_step("1.3", "Checking for Java...")
 
     java_version = run_command("java -version 2>&1 | head -1", check=False)
     if java_version and "version" in java_version.lower():
@@ -133,7 +173,7 @@ def check_java():
 
 def setup_android_sdk():
     """Setup Android SDK and emulator."""
-    print_step("1.3", "Configuring Android SDK...")
+    print_step("1.4", "Configuring Android SDK...")
 
     # Check if Android SDK exists
     android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
@@ -192,11 +232,11 @@ def setup_android_sdk():
 
     if not Path(sdkmanager).exists():
         print_error("Could not find sdkmanager")
-        print_info("Please install Android Studio from https://developer.android.com/studio")
+        print_error("Please install Android Studio from https://developer.android.com/studio (includes SDK and Emulator)")
         sys.exit(1)
 
     # Install required components
-    print_step("1.4", "Installing required SDK components...")
+    print_step("1.5", "Installing required SDK components...")
 
     components = [
         "platform-tools",
@@ -205,9 +245,21 @@ def setup_android_sdk():
         SYSTEM_IMAGE,
     ]
 
+    # Force install into ANDROID_HOME (Homebrew sdkmanager otherwise uses its own prefix)
+    sdk_root_arg = f'--sdk_root="{android_home}"'
     for component in components:
         print_info(f"Installing {component}...")
-        run_command(f'yes | "{sdkmanager}" "{component}"', check=False)
+        run_command(f'yes | "{sdkmanager}" {sdk_root_arg} "{component}"', check=False)
+
+    if not _sdk_has_emulator(android_home):
+        print_error("Emulator binary not found after installing components.")
+        print_error("Please install Android Studio from https://developer.android.com/studio and ensure SDK + Emulator are installed.")
+        sys.exit(1)
+
+    if not _sdk_has_system_image(android_home):
+        print_error("System image (android-34 google_apis arm64-v8a) not found after install.")
+        print_error("Please install Android Studio from https://developer.android.com/studio and install the SDK + Emulator system image.")
+        sys.exit(1)
 
     return android_home, sdkmanager
 
@@ -217,23 +269,24 @@ def create_avd(android_home, sdkmanager):
     print_step("2.1", f"Creating emulator '{AVD_NAME}'...")
 
     avdmanager = sdkmanager.replace("sdkmanager", "avdmanager")
+    sdk_root_arg = f'--sdk_root="{android_home}"'
 
     # Check if AVD already exists
-    avd_list = run_command(f'"{avdmanager}" list avd', check=False) or ""
+    avd_list = run_command(f'"{avdmanager}" {sdk_root_arg} list avd', check=False) or ""
 
     if AVD_NAME in avd_list:
         print_success(f"Emulator '{AVD_NAME}' already exists")
         return True
 
-    # Create AVD
+    # Create AVD (use --sdk_root so AVD points at our SDK's system image)
     print_info("Creating a new emulator...")
 
-    create_cmd = f'echo "no" | "{avdmanager}" create avd -n {AVD_NAME} -k "{SYSTEM_IMAGE}" --device "pixel_6"'
+    create_cmd = f'echo "no" | "{avdmanager}" {sdk_root_arg} create avd -n {AVD_NAME} -k "{SYSTEM_IMAGE}" --device "pixel_6"'
     result = run_command(create_cmd, check=False)
 
     if result is None:
         # Try alternative approach
-        create_cmd = f'"{avdmanager}" create avd -n {AVD_NAME} -k "{SYSTEM_IMAGE}" --device "pixel_6" --force'
+        create_cmd = f'"{avdmanager}" {sdk_root_arg} create avd -n {AVD_NAME} -k "{SYSTEM_IMAGE}" --device "pixel_6" --force'
         run_command(create_cmd, check=False)
 
     print_success("Emulator created")
@@ -244,9 +297,18 @@ def start_emulator(android_home):
     """Start the Android emulator."""
     print_step("2.2", "Starting the emulator...")
 
+    if not _sdk_has_system_image(android_home):
+        print_error("System image not found in SDK. The AVD needs android-34 google_apis arm64-v8a.")
+        print_info("Re-run this script to reinstall components into ANDROID_HOME, or install Android Studio.")
+        return False
+
     emulator_path = f"{android_home}/emulator/emulator"
     if not Path(emulator_path).exists():
-        emulator_path = "emulator"
+        # Resolve via PATH (set earlier in setup_android_sdk) so Popen gets a full path
+        emulator_path = shutil.which("emulator") or emulator_path
+    if not emulator_path or (emulator_path == f"{android_home}/emulator/emulator" and not Path(emulator_path).exists()):
+        print_error("Emulator binary not found. Check ANDROID_HOME and that SDK components are installed.")
+        return False
 
     # Check if emulator is already running
     devices = run_command("adb devices", check=False) or ""
@@ -254,26 +316,37 @@ def start_emulator(android_home):
         print_success("Emulator is already running")
         return True
 
-    # Start emulator in background
+    # Start emulator in background (log stderr so we can debug if it fails)
     print_info("Launching the emulator (this may take a few minutes)...")
+    emulator_log = SCRIPT_DIR / "emulator.log"
 
-    # Launch emulator
-    subprocess.Popen(
-        f'"{emulator_path}" -avd {AVD_NAME} -no-snapshot -writable-system -no-audio 2>/dev/null &',
-        shell=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    with open(emulator_log, "w") as logf:
+        proc = subprocess.Popen(
+            [emulator_path, "-avd", AVD_NAME, "-no-snapshot", "-writable-system", "-no-audio"],
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            cwd=SCRIPT_DIR,
+            env={**os.environ, "ANDROID_HOME": android_home, "ANDROID_SDK_ROOT": android_home},
+        )
 
-    # Wait for emulator to boot
+    # Wait for emulator to appear (adb wait-for-device)
     print_info("Waiting for emulator to start...")
+    run_command("adb wait-for-device", timeout=90, check=False)
 
-    max_wait = 180  # 3 minutes
+    max_wait = 420  # 7 minutes (first boot of arm64 image can be slow)
     start_time = time.time()
 
     while time.time() - start_time < max_wait:
+        if proc.poll() is not None:
+            print()
+            print_error("Emulator process exited unexpectedly. Check emulator.log for details.")
+            return False
         devices = run_command("adb devices", check=False) or ""
-        if "emulator" in devices and "device" in devices.split("emulator")[1][:20]:
+        if "emulator" in devices and "device" in devices:
+            if "offline" in devices:
+                time.sleep(5)
+                print(".", end="", flush=True)
+                continue
             # Check if boot completed
             boot_completed = run_command("adb shell getprop sys.boot_completed", check=False)
             if boot_completed and boot_completed.strip() == "1":
@@ -286,6 +359,7 @@ def start_emulator(android_home):
 
     print()
     print_error("Timeout: emulator did not start in time")
+    print_info(f"Check {emulator_log} for emulator output.")
     return False
 
 
@@ -658,6 +732,7 @@ def main():
 integration with Home Assistant via MQTT.
 
 Prerequisites:
+- Android Studio (or Android SDK with Emulator) — https://developer.android.com/studio
 - The DJI Home APK must be in the same folder as this script
 - An internet connection
 - Your DJI account
@@ -671,6 +746,7 @@ The process takes about 5-10 minutes.{Colors.END}
         # Step 1: Setup environment
         print_header("STEP 1: ENVIRONMENT SETUP")
 
+        check_android_studio_or_sdk()
         check_homebrew()
         check_java()
         android_home, sdkmanager = setup_android_sdk()
