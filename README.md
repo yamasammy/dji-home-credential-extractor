@@ -26,6 +26,7 @@ The DJI Home app stores authentication tokens in memory after login. This script
 ## Prerequisites
 
 - **macOS** (uses Homebrew for dependencies)
+- **Android Studio** (or Android SDK with Emulator) — [download](https://developer.android.com/studio). The script will use your existing SDK or try to install command-line tools; if the emulator is missing, it will ask you to install Android Studio.
 - **DJI Home APK** (`com.dji.home.apk`) — download from [APKMirror](https://www.apkmirror.com/apk/dji-technology-co-ltd/dji-home/) or [APKPure](https://apkpure.com/dji-home/com.dji.home)
 - **Internet connection**
 - **DJI account** with a paired Romo robot vacuum
