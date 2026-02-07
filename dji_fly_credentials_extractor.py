@@ -1,25 +1,35 @@
 #!/usr/bin/env python3
 """
-DJI Home Credentials Extractor
+DJI Fly Credentials Extractor
 ===============================
 
-Automated script to extract DJI Home credentials from an Android emulator.
+Automated script to extract DJI Fly credentials from an Android emulator.
+These credentials enable access to DJI's cloud APIs for flight records,
+drone telemetry, and account integration.
 
 Prerequisites:
 - macOS
-- The DJI Home APK (com.dji.home.apk) in the same folder as this script
+- Android Studio (or Android SDK with Emulator)
+- The DJI Fly APK in the same folder as this script
 - Internet connection
+
+How to get the DJI Fly APK:
+1. Go to https://www.apkmirror.com/apk/dji-technology-co-ltd/dji-fly/
+   or https://apkpure.com/dji-fly/dji.go.v5
+2. Download the APK — make sure it's the arm64-v8a variant (~700 MB)
+3. Place it in the same directory as this script
+4. Rename it to 'dji.go.v5.apk' (or any name containing 'fly' or 'go.v5')
 
 The script will:
 1. Install Android SDK and emulator if needed
 2. Create and launch a rooted Android emulator
-3. Install the DJI Home APK
+3. Install the DJI Fly APK
 4. Ask you to log in to the app
 5. Extract your credentials from memory
 6. Save everything to a file
 
 Usage:
-    python3 dji_credentials_extractor.py
+    python3 dji_fly_credentials_extractor.py
 """
 
 import os
@@ -34,11 +44,12 @@ from datetime import datetime
 
 # Configuration
 SCRIPT_DIR = Path(__file__).parent
-APK_NAME = "com.dji.home.apk"
-AVD_NAME = "dji_extractor"
+APK_NAME = "dji.go.v5.apk"
+PACKAGE_NAME = "dji.go.v5"
+AVD_NAME = "dji_fly_extractor"
 SYSTEM_IMAGE = "system-images;android-34;google_apis;arm64-v8a"
-OUTPUT_FILE = SCRIPT_DIR / "dji_credentials.txt"
-ENV_FILE = SCRIPT_DIR / ".env"
+OUTPUT_FILE = SCRIPT_DIR / "dji_fly_credentials.txt"
+ENV_FILE = SCRIPT_DIR / ".env.dji_fly"
 
 # Colors for terminal
 class Colors:
@@ -116,7 +127,6 @@ def check_android_studio_or_sdk():
     """Check for Android Studio or a valid Android SDK with emulator."""
     print_step("1.1", "Checking for Android Studio / Android SDK...")
 
-    # Android Studio installs SDK here on macOS
     studio_sdk = Path.home() / "Library/Android/sdk"
     android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     if not android_home:
@@ -175,11 +185,9 @@ def setup_android_sdk():
     """Setup Android SDK and emulator."""
     print_step("1.4", "Configuring Android SDK...")
 
-    # Check if Android SDK exists
     android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
 
     if not android_home:
-        # Try common locations
         possible_paths = [
             Path.home() / "Library/Android/sdk",
             Path.home() / "Android/Sdk",
@@ -194,16 +202,13 @@ def setup_android_sdk():
         print_warning("Android SDK not found")
         print_info("Installing Android SDK...")
 
-        # Install via Homebrew
         run_command("brew install --cask android-commandlinetools", check=False)
         android_home = str(Path.home() / "Library/Android/sdk")
         Path(android_home).mkdir(parents=True, exist_ok=True)
 
-    # Set environment variables
     os.environ["ANDROID_HOME"] = android_home
     os.environ["ANDROID_SDK_ROOT"] = android_home
 
-    # Update PATH
     platform_tools = f"{android_home}/platform-tools"
     emulator_path = f"{android_home}/emulator"
     cmdline_tools = f"{android_home}/cmdline-tools/latest/bin"
@@ -212,7 +217,6 @@ def setup_android_sdk():
 
     print_success(f"ANDROID_HOME = {android_home}")
 
-    # Check for sdkmanager
     sdkmanager = None
     possible_sdkmanager = [
         f"{android_home}/cmdline-tools/latest/bin/sdkmanager",
@@ -235,7 +239,6 @@ def setup_android_sdk():
         print_error("Please install Android Studio from https://developer.android.com/studio (includes SDK and Emulator)")
         sys.exit(1)
 
-    # Install required components
     print_step("1.5", "Installing required SDK components...")
 
     components = [
@@ -245,7 +248,6 @@ def setup_android_sdk():
         SYSTEM_IMAGE,
     ]
 
-    # Force install into ANDROID_HOME (Homebrew sdkmanager otherwise uses its own prefix)
     sdk_root_arg = f'--sdk_root="{android_home}"'
     for component in components:
         print_info(f"Installing {component}...")
@@ -282,7 +284,7 @@ def create_avd(android_home, sdkmanager):
 
     print_info("Creating a new emulator...")
 
-    # Use ANDROID_SDK_ROOT env var (more reliable than --sdk_root flag)
+    # Try with ANDROID_SDK_ROOT env var (more reliable than --sdk_root flag)
     env_with_sdk = f'ANDROID_SDK_ROOT="{android_home}" ANDROID_HOME="{android_home}"'
 
     create_cmd = f'{env_with_sdk} echo "no" | "{avdmanager}" create avd -n {AVD_NAME} -k "{SYSTEM_IMAGE}" --device "pixel_6"'
@@ -303,7 +305,7 @@ def create_avd(android_home, sdkmanager):
 
     if not _avd_exists(AVD_NAME):
         print_error(f"Failed to create AVD '{AVD_NAME}'.")
-        print_info(f"You can try manually: avdmanager create avd -n {AVD_NAME} -k '{SYSTEM_IMAGE}' --device pixel_6")
+        print_info("You can try manually: avdmanager create avd -n dji_fly_extractor -k 'system-images;android-34;google_apis;arm64-v8a' --device pixel_6")
         return False
 
     print_success("Emulator created")
@@ -321,19 +323,16 @@ def start_emulator(android_home):
 
     emulator_path = f"{android_home}/emulator/emulator"
     if not Path(emulator_path).exists():
-        # Resolve via PATH (set earlier in setup_android_sdk) so Popen gets a full path
         emulator_path = shutil.which("emulator") or emulator_path
     if not emulator_path or (emulator_path == f"{android_home}/emulator/emulator" and not Path(emulator_path).exists()):
         print_error("Emulator binary not found. Check ANDROID_HOME and that SDK components are installed.")
         return False
 
-    # Check if emulator is already running
     devices = run_command("adb devices", check=False) or ""
     if "emulator" in devices and "device" in devices:
         print_success("Emulator is already running")
         return True
 
-    # Start emulator in background (log stderr so we can debug if it fails)
     print_info("Launching the emulator (this may take a few minutes)...")
     emulator_log = SCRIPT_DIR / "emulator.log"
 
@@ -346,11 +345,10 @@ def start_emulator(android_home):
             env={**os.environ, "ANDROID_HOME": android_home, "ANDROID_SDK_ROOT": android_home},
         )
 
-    # Wait for emulator to appear (adb wait-for-device)
     print_info("Waiting for emulator to start...")
     run_command("adb wait-for-device", timeout=90, check=False)
 
-    max_wait = 420  # 7 minutes (first boot of arm64 image can be slow)
+    max_wait = 420  # 7 minutes
     start_time = time.time()
 
     while time.time() - start_time < max_wait:
@@ -364,11 +362,10 @@ def start_emulator(android_home):
                 time.sleep(5)
                 print(".", end="", flush=True)
                 continue
-            # Check if boot completed
             boot_completed = run_command("adb shell getprop sys.boot_completed", check=False)
             if boot_completed and boot_completed.strip() == "1":
                 print_success("Emulator started and ready!")
-                time.sleep(5)  # Give it a few more seconds
+                time.sleep(5)
                 return True
 
         time.sleep(5)
@@ -387,7 +384,6 @@ def setup_root():
     run_command("adb root", check=False)
     time.sleep(3)
 
-    # Verify root
     whoami = run_command("adb shell whoami", check=False)
     if whoami and "root" in whoami:
         print_success("Root access enabled")
@@ -398,40 +394,45 @@ def setup_root():
 
 
 def install_apk():
-    """Install DJI Home APK."""
-    print_step("3.1", "Installing DJI Home APK...")
+    """Install DJI Fly APK."""
+    print_step("3.1", "Installing DJI Fly APK...")
 
     apk_path = SCRIPT_DIR / APK_NAME
 
     # Also check for alternative names
     if not apk_path.exists():
         for f in SCRIPT_DIR.glob("*.apk"):
-            if "dji" in f.name.lower() and "home" in f.name.lower():
+            name_lower = f.name.lower()
+            if "dji" in name_lower and ("fly" in name_lower or "go.v5" in name_lower):
                 apk_path = f
                 break
 
     if not apk_path.exists():
-        # List APK files in directory
-        apk_files = list(SCRIPT_DIR.glob("*.apk"))
-        if apk_files:
-            print_info(f"APKs found: {[f.name for f in apk_files]}")
-            apk_path = apk_files[0]
-        else:
-            print_error(f"APK not found!")
-            print_info(f"Please place the DJI Home APK in: {SCRIPT_DIR}")
-            print_info("You can download it from APKMirror or APKPure")
-            sys.exit(1)
+        # No DJI Fly APK found — do NOT fall back to unrelated APKs
+        other_apks = list(SCRIPT_DIR.glob("*.apk"))
+        if other_apks:
+            print_warning(f"APKs in directory: {[f.name for f in other_apks]}")
+            print_warning("None of these appear to be DJI Fly (expected 'dji.go.v5.apk' or a file with 'fly' in the name)")
+        print_error("DJI Fly APK not found!")
+        print_info(f"Please download the DJI Fly APK and place it in: {SCRIPT_DIR}")
+        print_info("")
+        print_info("  Download from:")
+        print_info("    https://www.apkmirror.com/apk/dji-technology-co-ltd/dji-fly/")
+        print_info("    https://apkpure.com/dji-fly/dji.go.v5")
+        print_info("")
+        print_info(f"  Then rename it to '{APK_NAME}' or any name containing 'fly' or 'go.v5'")
+        sys.exit(1)
 
-    print_info(f"Installing {apk_path.name}...")
+    print_info(f"Installing {apk_path.name} (DJI Fly is ~700MB, this may take a minute)...")
 
     # Check if already installed
-    packages = run_command("adb shell pm list packages | grep dji.home", check=False)
-    if packages and "com.dji.home" in packages:
-        print_success("DJI Home is already installed")
+    packages = run_command(f"adb shell pm list packages | grep {PACKAGE_NAME}", check=False)
+    if packages and PACKAGE_NAME in packages:
+        print_success("DJI Fly is already installed")
         return True
 
-    # Install APK
-    result = run_command(f'adb install -r "{apk_path}"', check=False)
+    # Install APK (use -g to grant all permissions)
+    result = run_command(f'adb install -r -g "{apk_path}"', check=False, timeout=300)
 
     if result and "Success" in result:
         print_success("APK installed successfully")
@@ -442,12 +443,24 @@ def install_apk():
 
 
 def launch_app():
-    """Launch DJI Home app."""
-    print_step("3.2", "Launching DJI Home app...")
+    """Launch DJI Fly app."""
+    print_step("3.2", "Launching DJI Fly app...")
 
-    run_command("adb shell am start -n com.dji.home/.MainActivity", check=False)
-    time.sleep(5)
+    # Discover and use the launcher activity
+    activity = run_command(
+        f'adb shell cmd package resolve-activity --brief {PACKAGE_NAME} 2>/dev/null | tail -1',
+        check=False
+    )
 
+    if activity and "/" in activity:
+        print_info(f"Launcher activity: {activity}")
+        run_command(f'adb shell am start -n "{activity}"', check=False)
+    else:
+        # Fallback: use monkey to launch
+        print_info("Using monkey launcher...")
+        run_command(f"adb shell monkey -p {PACKAGE_NAME} -c android.intent.category.LAUNCHER 1", check=False)
+
+    time.sleep(8)  # DJI Fly takes longer to start than DJI Home
     print_success("App launched")
     return True
 
@@ -457,17 +470,20 @@ def wait_for_login():
     print_header("LOGIN REQUIRED")
 
     print(f"""
-{Colors.WARNING}The DJI Home app is now open in the emulator.
+{Colors.WARNING}The DJI Fly app is now open in the emulator.
 
-Please log in to your DJI account in the app.
+Please:
+1. Log in to your DJI account in the app
+2. Wait for the main screen to fully load
+3. If you have drones paired to your account, they should appear
+   (you don't need a physical drone connected)
 
-Once logged in and on the main screen (with your robot visible),
+Once logged in and on the main screen,
 press ENTER to continue...{Colors.END}
 """)
 
     input(f"{Colors.CYAN}>>> Press ENTER when you are logged in... {Colors.END}")
 
-    # Verify app is running and logged in
     time.sleep(2)
     return True
 
@@ -476,50 +492,47 @@ def extract_credentials():
     """Extract credentials from app memory."""
     print_header("EXTRACTING CREDENTIALS")
 
-    # Re-enable root access (may have been lost)
+    # Re-enable root access
     print_step("4.0", "Enabling root access...")
     run_command("adb root", check=False)
     time.sleep(3)
 
-    # Verify root
     whoami = run_command("adb shell whoami", check=False)
     if whoami and "root" in whoami:
         print_success("Root access OK")
     else:
         print_warning("Limited root access - trying anyway...")
 
-    print_step("4.1", "Searching for DJI Home process...")
+    print_step("4.1", f"Searching for {PACKAGE_NAME} process...")
 
-    # Get PID
-    pid = run_command("adb shell pidof com.dji.home", check=False)
+    pid = run_command(f"adb shell pidof {PACKAGE_NAME}", check=False)
 
     if not pid:
         print_error("App not found. Is it running?")
         return None
 
-    pid = pid.strip().split()[0]  # Get first PID if multiple
+    pid = pid.strip().split()[0]
     print_success(f"Process found: PID {pid}")
 
-    print_step("4.2", "Extracting memory (this may take a moment)...")
+    print_step("4.2", "Extracting memory (DJI Fly is large, this may take a while)...")
 
-    # Calculate skip value (0x12c00000 / 1048576 = 300)
+    # DJI Fly is a native app with a larger heap footprint
+    # Scan a wider memory range to find credentials
     skip_value = 0x12c00000 // 1048576  # = 300
+    count = 800  # Larger scan than DJI Home (DJI Fly is a bigger app)
 
-    # Dump memory - use simpler command
-    dump_cmd = f"dd if=/proc/{pid}/mem bs=1048576 skip={skip_value} count=500 of=/data/local/tmp/heap.bin"
+    dump_cmd = f"dd if=/proc/{pid}/mem bs=1048576 skip={skip_value} count={count} of=/data/local/tmp/heap.bin"
 
     print_info(f"Command: {dump_cmd}")
 
-    result = run_command(f'adb shell "{dump_cmd}" 2>&1', check=False, timeout=180)
+    result = run_command(f'adb shell "{dump_cmd}" 2>&1', check=False, timeout=300)
 
-    # Check if file was created
     file_check = run_command("adb shell ls -la /data/local/tmp/heap.bin", check=False)
 
     if not file_check or "No such file" in str(file_check):
         print_error("Memory dump failed")
         print_info(f"Result: {result}")
 
-        # Try alternative method with cat
         print_info("Trying alternative method...")
         alt_cmd = f"cat /proc/{pid}/maps | head -5"
         maps = run_command(f'adb shell "{alt_cmd}"', check=False)
@@ -531,31 +544,44 @@ def extract_credentials():
 
     print_step("4.3", "Analyzing data...")
 
-    # Extract strings and search for credentials
-    # Use ';' not '&&' so empty results don't break the chain
-    extract_cmd = """
+    # DJI Fly is a native Android app (Java/Kotlin), not Flutter.
+    # Token format is the same (DJI SSO uses US_ prefix).
+    # Other patterns differ from DJI Home.
+    # IMPORTANT: use ';' not '&&' so empty results don't break the chain
+    # (e.g. user has no drone paired — drone fields will be empty and that's OK)
+    extract_cmd = r"""
     cd /data/local/tmp ;
     echo "=== USER_TOKEN ===" ;
-    strings heap.bin | grep -o 'US_[A-Za-z0-9_-]\\{50,\\}' | head -1 ;
+    strings heap.bin | grep -o 'US_[A-Za-z0-9_-]\{50,\}' | head -1 ;
     echo "=== USER_ID ===" ;
-    strings heap.bin | grep -A 1 'flutter.user_id' | grep -o '[0-9]\\{15,\\}' | head -1 ;
+    strings heap.bin | grep -oE '"user_id"[[:space:]]*:[[:space:]]*"?[0-9]{10,}"?' | head -1 | grep -oE '[0-9]{10,}' ;
+    strings heap.bin | grep -oE '"uid"[[:space:]]*:[[:space:]]*"?[0-9]{10,}"?' | head -1 | grep -oE '[0-9]{10,}' ;
+    strings heap.bin | grep -oE '"member_uid"[[:space:]]*:[[:space:]]*"?[0-9]{10,}"?' | head -1 | grep -oE '[0-9]{10,}' ;
     echo "=== USER_EMAIL ===" ;
-    strings heap.bin | grep -A 1 'flutter.user_email' | grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}' | head -1 ;
+    strings heap.bin | grep -oE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' | head -1 ;
     echo "=== USER_NAME ===" ;
+    strings heap.bin | grep -oE '"nickname"[[:space:]]*:[[:space:]]*"[^"]{2,30}"' | head -1 | sed 's/.*"nickname"[[:space:]]*:[[:space:]]*"//;s/"$//' ;
     strings heap.bin | grep -o 'djiuser_[A-Za-z0-9_]*' | head -1 ;
-    echo "=== DEVICE_SN ===" ;
-    strings heap.bin | grep -oE '"sn":"[A-Z0-9]+"|"device_sn":"[A-Z0-9]+"' | head -1 | grep -oE '[A-Z0-9]{10,}' ;
-    strings heap.bin | grep -oE '[0-9][A-Z]{3,4}[A-Z0-9]{8,}' | sort | uniq -c | sort -rn | head -1 | sed 's/^[[:space:]]*[0-9]*[[:space:]]*//' ;
-    echo "=== PAIR_UUID ===" ;
-    strings heap.bin | grep -oE 'ROMO-[A-Z0-9]+' | head -1 ;
-    echo "=== IOT_URL ===" ;
-    strings heap.bin | grep -o 'things-access[a-z0-9.-]*\\.iot\\.djigate\\.com' | head -1 ;
+    echo "=== DRONE_SN ===" ;
+    strings heap.bin | grep -oE '"sn"[[:space:]]*:[[:space:]]*"[A-Z0-9]{10,}"' | head -1 | grep -oE '[A-Z0-9]{10,}' ;
+    strings heap.bin | grep -oE '"serial_number"[[:space:]]*:[[:space:]]*"[A-Z0-9]{10,}"' | head -1 | grep -oE '[A-Z0-9]{10,}' ;
+    strings heap.bin | grep -oE '"device_sn"[[:space:]]*:[[:space:]]*"[A-Z0-9]{10,}"' | head -1 | grep -oE '[A-Z0-9]{10,}' ;
+    echo "=== DRONE_MODEL ===" ;
+    strings heap.bin | grep -oE '"model_name"[[:space:]]*:[[:space:]]*"[^"]{3,40}"' | head -1 | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"//;s/"$//' ;
+    strings heap.bin | grep -oE '"product_type"[[:space:]]*:[[:space:]]*"[^"]{3,40}"' | head -1 | sed 's/.*"product_type"[[:space:]]*:[[:space:]]*"//;s/"$//' ;
+    strings heap.bin | grep -oE 'DJI (Mini|Mavic|Air|Avata|FPV|Phantom|Inspire|Matrice)[A-Za-z0-9 ]*' | head -1 ;
+    echo "=== ACCOUNT_TOKEN ===" ;
+    strings heap.bin | grep -oE '"account_token"[[:space:]]*:[[:space:]]*"[A-Za-z0-9_-]{20,}"' | head -1 | sed 's/.*"account_token"[[:space:]]*:[[:space:]]*"//;s/"$//' ;
+    echo "=== OPENAPI_TOKEN ===" ;
+    strings heap.bin | grep -oE '"openapi_token"[[:space:]]*:[[:space:]]*"[A-Za-z0-9_-]{20,}"' | head -1 | sed 's/.*"openapi_token"[[:space:]]*:[[:space:]]*"//;s/"$//' ;
+    echo "=== API_URLS ===" ;
+    strings heap.bin | grep -oE 'https?://[a-z0-9.-]*\.dji(gate|service|cdn)?\.com[a-z0-9/._-]*' | sort -u | head -20 ;
     echo "=== DEVICE_UUID ===" ;
-    strings heap.bin | grep -A 1 'flutter._deviceUUIDKey' | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 ;
+    strings heap.bin | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -3 ;
     rm -f heap.bin
     """
 
-    # Run via adb shell with stdin to avoid quoting issues with nested double quotes
+    # Run via adb shell with stdin to avoid quoting hell with nested double quotes
     try:
         proc = subprocess.run(
             ["adb", "shell"],
@@ -570,29 +596,52 @@ def extract_credentials():
 
     if not output:
         print_error("Extraction failed")
+        # Show stderr for debugging
         if proc and proc.stderr:
             print_info(f"stderr: {proc.stderr.strip()[:200]}")
         return None
 
-    # Parse output
+    # Parse output — each section uses ';' so empty results don't break the chain.
+    # Multiple fallback commands per section means we may get several values;
+    # keep the first non-empty one for scalar fields, collect all for list fields.
     credentials = {}
     current_key = None
+    list_keys = {"api_urls", "device_uuid"}
 
     for line in output.split('\n'):
         line = line.strip()
         if line.startswith("=== ") and line.endswith(" ==="):
             current_key = line[4:-4].lower()
         elif line and current_key:
-            credentials[current_key] = line
-            current_key = None
+            if current_key in list_keys:
+                lst = credentials.get(current_key, [])
+                if line not in lst:
+                    lst.append(line)
+                credentials[current_key] = lst
+            elif current_key not in credentials:
+                # First non-empty value wins (subsequent fallback lines are ignored)
+                credentials[current_key] = line
 
-    # Validate
+    # Validate — only the token is truly required
     if not credentials.get("user_token"):
         print_error("User token not found")
-        print_info("Make sure you are logged in to the app")
+        print_info("Make sure you are fully logged in to the DJI Fly app")
         return None
 
+    # It's OK if drone fields are empty (user may not own a drone)
+    if not credentials.get("drone_sn"):
+        print_warning("No drone serial number found (normal if you don't have a drone paired)")
+
     print_success("Credentials extracted successfully!")
+
+    # Print summary
+    for key, value in credentials.items():
+        if isinstance(value, list):
+            print_info(f"  {key}: {len(value)} entries found")
+        elif key == "user_token":
+            print_info(f"  {key}: {value[:20]}...{value[-10:]}")
+        else:
+            print_info(f"  {key}: {value}")
 
     return credentials
 
@@ -615,61 +664,79 @@ def test_api(credentials):
     headers = {
         "x-member-token": user_token,
         "X-DJI-locale": "en_US",
+        "User-Agent": "DJIFly",
     }
 
-    # Get MQTT credentials
+    # Test 1: Try the account info endpoint
+    print_info("Testing account access...")
     try:
         response = requests.get(
-            "https://home-api-vg.djigate.com/app/api/v1/users/auth/token",
-            params={"reason": "mqtt"},
+            "https://active.dji.com/app/api/v1/member/info",
             headers=headers,
             timeout=30
         )
-
         data = response.json()
-
-        if data.get("result", {}).get("code") == 0:
-            mqtt_data = data["data"]
-            credentials["mqtt_domain"] = mqtt_data.get("mqtt_domain")
-            credentials["mqtt_port"] = mqtt_data.get("mqtt_port")
-            credentials["mqtt_user_uuid"] = mqtt_data.get("user_uuid")
-            credentials["api_working"] = True
-            print_success("API is working! MQTT credentials retrieved")
+        if data.get("result", {}).get("code") == 0 or data.get("code") == 0:
+            member = data.get("data", data)
+            credentials["account_verified"] = True
+            if member.get("nickname"):
+                credentials["user_name"] = member["nickname"]
+            if member.get("uid"):
+                credentials["user_id"] = str(member["uid"])
+            if member.get("email"):
+                credentials["user_email"] = member["email"]
+            print_success("Account access verified!")
         else:
-            credentials["api_working"] = False
-            print_warning(f"API error: {data.get('result', {}).get('message')}")
-
+            print_warning(f"Account API: {data.get('result', {}).get('message', data.get('message', 'Unknown'))}")
     except Exception as e:
-        credentials["api_working"] = False
-        print_warning(f"API error: {e}")
+        print_warning(f"Account API error: {e}")
 
-    # Try to get device list if SN not found
-    if not credentials.get("device_sn"):
-        print_step("4.5", "Retrieving devices via API...")
-        try:
-            # Try homes endpoint
-            response = requests.get(
-                "https://home-api-vg.djigate.com/app/api/v1/homes",
-                headers=headers,
-                timeout=30
-            )
-            data = response.json()
+    # Test 2: Try to get device/drone list
+    print_step("4.5", "Retrieving drone information via API...")
+    try:
+        response = requests.get(
+            "https://active.dji.com/app/api/v1/devices",
+            headers=headers,
+            timeout=30
+        )
+        data = response.json()
+        if data.get("result", {}).get("code") == 0 or data.get("code") == 0:
+            devices = data.get("data", {})
+            if isinstance(devices, list):
+                for device in devices:
+                    sn = device.get("sn") or device.get("serial_number")
+                    model = device.get("model_name") or device.get("product_type") or device.get("name")
+                    if sn:
+                        if not credentials.get("drone_sn"):
+                            credentials["drone_sn"] = sn
+                        if model:
+                            credentials["drone_model"] = model
+                        print_success(f"Drone found via API: {sn} ({model or 'Unknown model'})")
+    except Exception as e:
+        print_warning(f"Device API: {e}")
 
-            if data.get("result", {}).get("code") == 0:
-                homes = data.get("data", {}).get("homes", [])
-                for home in homes:
-                    devices = home.get("devices", [])
-                    for device in devices:
-                        sn = device.get("sn") or device.get("device_sn")
-                        if sn:
-                            credentials["device_sn"] = sn
-                            credentials["device_name"] = device.get("name", "")
-                            print_success(f"Device found via API: {sn} ({credentials['device_name']})")
-                            break
-                    if credentials.get("device_sn"):
-                        break
-        except Exception as e:
-            print_warning(f"Could not retrieve devices: {e}")
+    # Test 3: Try flight records API
+    print_step("4.6", "Checking flight records access...")
+    try:
+        response = requests.get(
+            "https://mydjiflight.dji.com/api/v1/user/flights",
+            headers={"Authorization": f"Bearer {user_token}", **headers},
+            params={"page": 1, "page_size": 5},
+            timeout=30
+        )
+        data = response.json()
+        if response.status_code == 200 and (data.get("result", {}).get("code") == 0 or data.get("code") == 0):
+            flights = data.get("data", {}).get("flights", data.get("data", []))
+            count = len(flights) if isinstance(flights, list) else 0
+            credentials["flight_records_accessible"] = True
+            credentials["recent_flights_count"] = count
+            print_success(f"Flight records accessible ({count} recent flights)")
+        else:
+            credentials["flight_records_accessible"] = False
+            print_warning(f"Flight records: {data.get('message', 'Not available or different API format')}")
+    except Exception as e:
+        credentials["flight_records_accessible"] = False
+        print_warning(f"Flight records API: {e}")
 
     return credentials
 
@@ -680,24 +747,35 @@ def save_credentials(credentials):
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Create .env file for mqtt client
-    env_content = f"""# DJI Home Credentials - Extracted on {timestamp}
-# This file is used by dji_mqtt_client.py
+    # Create .env file
+    api_urls = credentials.get('api_urls', [])
+    api_urls_str = ",".join(api_urls) if isinstance(api_urls, list) else str(api_urls)
+
+    env_content = f"""# DJI Fly Credentials - Extracted on {timestamp}
+# Generated by dji_fly_credentials_extractor.py
 
 DJI_USER_TOKEN={credentials.get('user_token', '')}
 DJI_USER_ID={credentials.get('user_id', '')}
-DJI_DEVICE_SN={credentials.get('device_sn', '')}
-DJI_API_URL=https://home-api-vg.djigate.com
-DJI_LOCALE=en_US
+DJI_USER_EMAIL={credentials.get('user_email', '')}
+DJI_DRONE_SN={credentials.get('drone_sn', '')}
+DJI_DRONE_MODEL={credentials.get('drone_model', '')}
 """
 
     ENV_FILE.write_text(env_content)
-    print_success(f".env file created: {ENV_FILE}")
+    print_success(f"Env file created: {ENV_FILE}")
 
     # Create human-readable file
+    device_uuids = credentials.get('device_uuid', [])
+    if isinstance(device_uuids, list):
+        device_uuid_str = "\n                ".join(device_uuids) if device_uuids else "Not found"
+    else:
+        device_uuid_str = device_uuids or "Not found"
+
+    api_urls_display = "\n                ".join(api_urls) if api_urls else "None discovered"
+
     content = f"""
 ================================================================================
-                    DJI HOME CREDENTIALS
+                    DJI FLY CREDENTIALS
                     Extracted on: {timestamp}
 ================================================================================
 
@@ -707,32 +785,37 @@ User Token:     {credentials.get('user_token', 'Not found')}
 User ID:        {credentials.get('user_id', 'Not found')}
 User Email:     {credentials.get('user_email', 'Not found')}
 User Name:      {credentials.get('user_name', 'Not found')}
-Device UUID:    {credentials.get('device_uuid', 'Not found')}
+Account Token:  {credentials.get('account_token', 'Not found')}
+OpenAPI Token:  {credentials.get('openapi_token', 'Not found')}
 
-DEVICE
-------
-Device SN:      {credentials.get('device_sn', 'Not found')}
-Pair UUID:      {credentials.get('pair_uuid', 'Not found')}
-IoT URL:        {credentials.get('iot_url', 'Not found')}
+DRONE
+-----
+Drone SN:       {credentials.get('drone_sn', 'Not found')}
+Drone Model:    {credentials.get('drone_model', 'Not found')}
 
-MQTT
-----
-Broker:         {credentials.get('mqtt_domain', 'crobot-mqtt-us.djigate.com')}
-Port:           {credentials.get('mqtt_port', 8883)}
-Username:       {credentials.get('mqtt_user_uuid', 'Obtained via API')}
-Password:       Obtained dynamically via API (expires every ~4h)
-
-API ENDPOINT
+DEVICE UUIDs
 ------------
-URL:            https://home-api-vg.djigate.com/app/api/v1/users/auth/token?reason=mqtt
-Header:         x-member-token: <USER_TOKEN>
+                {device_uuid_str}
+
+API ENDPOINTS (discovered in memory)
+-------------------------------------
+                {api_urls_display}
+
+API ACCESS
+----------
+Account Info:       {"✓ Verified" if credentials.get('account_verified') else "✗ Not verified"}
+Flight Records:     {"✓ Accessible" if credentials.get('flight_records_accessible') else "✗ Not accessible"}
+Recent Flights:     {credentials.get('recent_flights_count', 'N/A')}
 
 ================================================================================
 
 USAGE:
 ------
-The .env file has been created automatically.
-Simply run: python3 dji_mqtt_client.py --subscribe
+The .env.dji_fly file has been created automatically.
+
+# Test your token with curl:
+curl -H "x-member-token: $DJI_USER_TOKEN" \\
+     https://active.dji.com/app/api/v1/member/info
 
 ================================================================================
 """
@@ -757,19 +840,32 @@ def cleanup():
 
 
 def main():
-    print_header("DJI HOME CREDENTIALS EXTRACTOR")
+    print_header("DJI FLY CREDENTIALS EXTRACTOR")
 
     print(f"""
-{Colors.BLUE}This script will extract your DJI Home credentials to enable
-integration with Home Assistant via MQTT.
+{Colors.BLUE}This script will extract your DJI Fly credentials from an
+Android emulator. These credentials can be used to access
+DJI's cloud APIs for flight records, drone info, and account
+integration.
 
 Prerequisites:
-- Android Studio (or Android SDK with Emulator) — https://developer.android.com/studio
-- The DJI Home APK must be in the same folder as this script
+- Android Studio (or Android SDK with Emulator)
+  https://developer.android.com/studio
+- The DJI Fly APK in this folder (see below)
 - An internet connection
 - Your DJI account
 
-The process takes about 5-10 minutes.{Colors.END}
+{Colors.WARNING}How to get the DJI Fly APK:{Colors.END}
+  1. Go to: https://www.apkmirror.com/apk/dji-technology-co-ltd/dji-fly/
+     or:    https://apkpure.com/dji-fly/dji.go.v5
+  2. Download the APK (arm64-v8a variant, ~700 MB)
+  3. Place it in: {SCRIPT_DIR}
+  4. Rename to 'dji.go.v5.apk' (or any name with 'fly' or 'go.v5')
+
+{Colors.WARNING}Note: DJI Fly is ~700MB. Installation in the emulator may
+take a few minutes.{Colors.END}
+
+{Colors.BLUE}The process takes about 10-15 minutes.{Colors.END}
 """)
 
     input(f"{Colors.CYAN}>>> Press ENTER to start... {Colors.END}")

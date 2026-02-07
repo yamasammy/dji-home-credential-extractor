@@ -108,9 +108,118 @@ curl "https://home-api-vg.djigate.com/app/api/v1/users/auth/token?reason=mqtt" \
 - Extracts strings matching known DJI token patterns (`US_...`, `flutter.user_id`, etc.)
 - MQTT credentials are **not** stored in the APK — they are fetched dynamically from the API using the `user_token`
 
+---
+
+# DJI Fly Credential Extractor
+
+Same technique, adapted for the **DJI Fly** drone app (`dji.go.v5`). Extracts your DJI account token, drone serial number, and tests access to DJI's cloud APIs (account info, devices, flight records).
+
+## What It Extracts
+
+| Field | Description |
+|-------|-------------|
+| `DJI_USER_TOKEN` | Authentication token (`US_...`) — same DJI SSO system |
+| `DJI_USER_ID` | Numeric user ID |
+| `DJI_USER_EMAIL` | Account email address |
+| `DJI_DRONE_SN` | Drone serial number |
+| `DJI_DRONE_MODEL` | Drone model name (e.g., DJI Mini 4 Pro) |
+| API URLs | DJI cloud endpoints discovered in memory |
+| Account/OpenAPI tokens | Additional tokens if present |
+
+## Prerequisites
+
+- **macOS** (uses Homebrew for dependencies)
+- **Android Studio** (or Android SDK with Emulator) — [download](https://developer.android.com/studio)
+- **DJI Fly APK** (see download instructions below)
+- **Internet connection**
+- **DJI account**
+
+## How to Get the DJI Fly APK
+
+> **Important:** The DJI Fly APK is **not** included in this repo. You must download it yourself.
+
+1. Go to one of these sites:
+   - [APKMirror](https://www.apkmirror.com/apk/dji-technology-co-ltd/dji-fly/) (recommended)
+   - [APKPure](https://apkpure.com/dji-fly/dji.go.v5)
+2. Download the APK — make sure you pick the **arm64-v8a** variant (~700 MB)
+3. Place it in the same directory as the script
+4. Rename it to `dji.go.v5.apk` (or any name containing `fly` or `go.v5`)
+
+> **Note:** DJI Fly is ~700 MB. Installation in the emulator takes longer than DJI Home.
+
+## Usage
+
+1. Verify the APK is in place:
+
+```
+dji-home-credential-extractor/
+  dji_fly_credentials_extractor.py
+  dji.go.v5.apk                    <-- arm64-v8a variant, ~700 MB
+```
+
+2. Run the extractor:
+
+```bash
+python3 dji_fly_credentials_extractor.py
+```
+
+3. Follow the on-screen instructions:
+   - The script will install dependencies and start an Android emulator (first run takes ~10 min)
+   - When the emulator is ready, DJI Fly will open automatically
+   - **Log in to your DJI account** in the emulator
+   - Wait for the main screen to fully load
+   - Press ENTER in the terminal to start extraction
+
+4. Credentials are saved to:
+   - `.env.dji_fly` — environment variables
+   - `dji_fly_credentials.txt` — human-readable summary
+
+## After Extraction
+
+Test your token with curl:
+
+```bash
+# Account info
+curl -H "x-member-token: $DJI_USER_TOKEN" \
+     https://active.dji.com/app/api/v1/member/info
+```
+
+## Differences from DJI Home Extractor
+
+| | DJI Home | DJI Fly |
+|---|---|---|
+| **App** | `com.dji.home` (Flutter) | `dji.go.v5` (Native Android) |
+| **Device** | Romo robot vacuum | DJI drones (Mini, Mavic, Air, etc.) |
+| **APK size** | ~100 MB | ~700 MB |
+| **Memory scan** | 500 MB | 800 MB (larger app footprint) |
+| **API** | `home-api-vg.djigate.com` | `active.dji.com`, `mydjiflight.dji.com` |
+| **MQTT** | Robot vacuum telemetry | N/A (consumer drones use different protocol) |
+| **Output** | `.env` / `dji_credentials.txt` | `.env.dji_fly` / `dji_fly_credentials.txt` |
+
+---
+
+## Troubleshooting (both scripts)
+
+| Issue | Solution |
+|-------|----------|
+| Emulator won't start | Ensure you have enough disk space (~10GB) and RAM (~4GB free). Check `emulator.log` for details. |
+| APK not found | Place the `.apk` file in the same directory as the script |
+| Root access denied | Use a Google APIs system image (not Google Play) — the script does this by default |
+| Token not found | Make sure you're fully logged in and on the main screen before pressing ENTER |
+| API returns error | Token may have expired — re-run the extractor |
+| "Broken AVD system path" | SDK components installed in wrong location — the scripts use `--sdk_root` to fix this |
+
+## Technical Details
+
+- Uses `google_apis` system image (rootable, unlike `google_play` images)
+- **DJI Home**: Memory dump reads 500MB starting at offset `0x12c00000` (heap region); extracts Flutter storage patterns
+- **DJI Fly**: Memory dump reads 800MB starting at same offset; extracts native Java/Kotlin storage patterns
+- Both scripts extract strings matching the DJI SSO token format (`US_...`)
+- MQTT credentials (DJI Home only) are fetched dynamically from the API using the `user_token`
+
 ## Disclaimer
 
-This tool is intended for extracting credentials from **your own DJI account** to enable local smart home integrations. Use responsibly and only with devices you own.
+These tools are intended for extracting credentials from **your own DJI account** to enable local integrations and personal use. Use responsibly and only with devices you own.
 
 ## License
 
